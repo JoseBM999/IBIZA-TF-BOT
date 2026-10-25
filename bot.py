@@ -16,9 +16,9 @@ CHAT_ID = "8662528470"
 alerta_enviada_hoy = False
 
 def generar_reporte_mercado():
-    """Consulta en vivo y de forma totalmente segura los precios del mercado"""
+    """Consulta en vivo y genera el reporte con hora exacta de actualización"""
     try:
-        # Usamos Ticker().history para evitar conflictos de estructuras en Pandas
+        # Tickers
         eur_ticker = yf.Ticker("EURUSD=X")
         df_eur = eur_ticker.history(period="1d", interval="1m")
         if df_eur.empty:
@@ -35,7 +35,7 @@ def generar_reporte_mercado():
             val = df_eur['Close'].iloc[-1]
             precio_actual = float(val.item() if hasattr(val, 'item') else val)
 
-        precio_brent = 115.56
+        precio_brent = 110.47
         if not df_brent.empty:
             val_b = df_brent['Close'].iloc[-1]
             precio_brent = float(val_b.item() if hasattr(val_b, 'item') else val_b)
@@ -70,6 +70,9 @@ def generar_reporte_mercado():
         sl_sell = precio_actual + 0.0020
         tp_sell = precio_actual - 0.0040
 
+        # Hora exacta del servidor en tiempo real
+        hora_exacta = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         mensaje = (
             f"🏛️ **SISTEMA TRADING INSTITUCIONAL** 📈📉\n\n"
             f"📊 **EUR/USD:** {precio_actual:.5f}\n"
@@ -94,7 +97,8 @@ def generar_reporte_mercado():
             f"• Petróleo y Dólar: La fluctuación del Brent impacta directamente la inflación europea y la moneda refugio.\n"
             f"• Geopolítica: Seguimiento activo de tensiones globales y decisiones del BCE / FED.\n\n"
             f"------------------------------------\n"
-            f"📍 **ESTADO:** 🔄 Datos actualizados al momento de tu consulta."
+            f"📍 **ESTADO:** 🔄 Datos actualizados en vivo\n"
+            f"⏱️ **Hora:** {hora_exacta}"
         )
         return mensaje, precio_actual, high_asia, low_asia
     except Exception as e:
