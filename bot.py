@@ -1,7 +1,7 @@
 import os
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import requests
 import yfinance as yf
 import pandas as pd
@@ -22,7 +22,8 @@ def obtener_noticias_forex_factory():
         response = requests.get(url, timeout=8)
         if response.status_code == 200:
             events = response.json()
-            hoy_str = datetime.now().strftime('%Y-%m-%d')
+            colombia_tz = timezone(timedelta(hours=-5))
+            hoy_str = datetime.now(colombia_tz).strftime('%Y-%m-%d')
             noticias_hoy = [e for e in events if e.get('date', '').startswith(hoy_str)]
             
             if not noticias_hoy:
@@ -61,27 +62,30 @@ def obtener_noticias_forex_factory():
     return "🔴 **Alta:** NÓMINAS / Tipos de interés / Empleo.\n🟡 **Media:** Discursos de bancos centrales.\n⚪ **Baja:** Datos secundarios de inventarios."
 
 def generar_reporte_mercado():
-    """Consulta en vivo y genera el reporte institucional completo con datos dinámicos y actualizados"""
+    """Consulta en vivo con descarga directa para evitar caché estática"""
     try:
-        # Descarga de datos en tiempo real con respaldo
-        eur_ticker = yf.Ticker("EURUSD=X")
-        df_eur = eur_ticker.history(period="1d", interval="1m")
+        # Descarga forzada en tiempo real para evitar datos congelados de caché
+        df_eur = yf.download("EURUSD=X", period="1d", interval="1m", progress=False)
         if df_eur.empty:
-            df_eur = eur_ticker.history(period="5d", interval="15m")
+            df_eur = yf.download("EURUSD=X", period="5d", interval="15m", progress=False)
 
-        brent_ticker = yf.Ticker("BZ=F")
-        df_brent = brent_ticker.history(period="1d", interval="1h")
+        df_brent = yf.download("BZ=F", period="1d", interval="1h", progress=False)
         if df_brent.empty:
-            df_brent = brent_ticker.history(period="5d", interval="1d")
+            df_brent = yf.download("BZ=F", period="5d", interval="1d", progress=False)
 
-        # Extracción segura de valores numéricos puros
+        # Extracción segura de valores numéricos puros con aplanamiento de columnas multindex de yfinance
+        if isinstance(df_eur.columns, pd.MultiIndex):
+            df_eur.columns = df_eur.columns.get_level_values(0)
+        if isinstance(df_brent.columns, pd.MultiIndex):
+            df_brent.columns = df_brent.columns.get_level_values(0)
+
         precio_actual = 1.12000
-        if not df_eur.empty:
+        if not df_eur.empty and 'Close' in df_eur.columns:
             val = df_eur['Close'].iloc[-1]
             precio_actual = float(val.item() if hasattr(val, 'item') else val)
 
         precio_brent = 110.47
-        if not df_brent.empty:
+        if not df_brent.empty and 'Close' in df_brent.columns:
             val_b = df_brent['Close'].iloc[-1]
             precio_brent = float(val_b.item() if hasattr(val_b, 'item') else val_b)
 
@@ -90,27 +94,35 @@ def generar_reporte_mercado():
         high_asia = precio_actual + 0.0020
         low_asia = precio_actual - 0.0020
 
-        if not df_eur.empty:
+        if not df_eur.empty and 'Close' in df_eur.columns:
             ema_series = df_eur['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
             ema_50 = float(ema_series.item() if hasattr(ema_series, 'item') else ema_series)
             
             delta = df_eur['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            gain_series = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss_series = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             
-            loss = loss.replace(0, 0.00001)
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
+            if not gain_series.empty and not loss_series.empty:
+                g_val = gain_series.iloc[-1]
+                l_val = loss_series.iloc[-1]
+                g_val = float(g_val.item() if hasattr(g_val, 'item') else g_val)
+                l_val = float(l_val.item() if hasattr(l_val, 'item') else l_val)
+                
+                if pd.isna(g_val) or pd.isna(l_val) or (g_val == 0 and l_val == 0):
+                    rsi_actual = 50.0
+                else:
+                    l_val = max(l_val, 0.00001)
+                    rs = g_val / l_val
+                    rsi_val = 100 - (100 / (1 + rs))
+                    rsi_actual = float(rsi_val.item() if hasattr(rsi_val, 'item') else rsi_val)
             
-            rsi_val = rsi.iloc[-1]
-            if not pd.isna(rsi_val):
-                rsi_actual = float(rsi_val.item() if hasattr(rsi_val, 'item') else rsi_val)
+            if 'High' in df_eur.columns:
+                high_val = df_eur['High'].max()
+                high_asia = float(high_val.item() if hasattr(high_val, 'item') else high_val)
             
-            high_val = df_eur['High'].max()
-            high_asia = float(high_val.item() if hasattr(high_val, 'item') else high_val)
-            
-            low_val = df_eur['Low'].min()
-            low_asia = float(low_val.item() if hasattr(low_val, 'item') else low_val)
+            if 'Low' in df_eur.columns:
+                low_val = df_eur['Low'].min()
+                low_asia = float(low_val.item() if hasattr(low_val, 'item') else low_val)
 
         # Cálculos exactos de Gestión de Riesgo (Ratio 1:2 - SL 20 pips / TP 40 pips dinámicos)
         sl_buy = precio_actual - 0.0020
@@ -121,8 +133,9 @@ def generar_reporte_mercado():
         # Obtener noticias categorizadas de Forex Factory en vivo
         noticias_rf = obtener_noticias_forex_factory()
 
-        # Hora exacta del servidor al segundo para verificar actividad en tiempo real
-        hora_exacta = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # Hora exacta en la hora local de Colombia (UTC-5)
+        colombia_tz = timezone(timedelta(hours=-5))
+        hora_exacta = datetime.now(colombia_tz).strftime('%Y-%m-%d %H:%M:%S')
 
         mensaje = (
             f"🏛️ **SISTEMA TRADING INSTITUCIONAL** 📈📉\n\n"
@@ -147,7 +160,7 @@ def generar_reporte_mercado():
             f"• Geopolítica: Seguimiento activo de tensiones globales y decisiones del BCE / FED.\n\n"
             f"------------------------------------\n"
             f"📍 **ESTADO:** 🔄 Datos actualizados en vivo\n"
-            f"⏱️ **Hora:** {hora_exacta}"
+            f"⏱️ **Hora Colombia:** {hora_exacta}"
         )
         return mensaje, precio_actual, high_asia, low_asia
     except Exception as e:
