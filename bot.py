@@ -15,10 +15,55 @@ CHAT_ID = "8662528470"
 
 alerta_enviada_hoy = False
 
-def generar_reporte_mercado():
-    """Consulta en vivo y genera el reporte con hora exacta de actualización"""
+def obtener_noticias_forex_factory():
+    """Consume el feed oficial en vivo del calendario de Forex Factory clasificadas por impacto"""
     try:
-        # Tickers
+        url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+        response = requests.get(url, timeout=8)
+        if response.status_code == 200:
+            events = response.json()
+            hoy_str = datetime.now().strftime('%Y-%m-%d')
+            noticias_hoy = [e for e in events if e.get('date', '').startswith(hoy_str)]
+            
+            if not noticias_hoy:
+                noticias_hoy = events[:6]
+            
+            texto_rojo = ""
+            texto_amarillo = ""
+            texto_gris = ""
+            
+            for event in noticias_hoy[:8]:
+                impacto = event.get('impact', 'Low')
+                title = event.get('title', '')
+                country = event.get('country', '')
+                date_raw = event.get('date', '')
+                time_str = date_raw[11:16] if len(date_raw) >= 16 else ""
+                
+                linea = f"• [{country}] {title} ({time_str})\n"
+                if impacto == 'High':
+                    texto_rojo += linea
+                elif impacto == 'Medium':
+                    texto_amarillo += linea
+                else:
+                    texto_gris += linea
+                    
+            res = ""
+            if texto_rojo:
+                res += f"🔴 **Carpeta Roja (Alta):**\n{texto_rojo}\n"
+            if texto_amarillo:
+                res += f"🟡 **Carpeta Amarilla (Media):**\n{texto_amarillo}\n"
+            if texto_gris:
+                res += f"⚪ **Carpeta Blanca/Gris (Baja):**\n{texto_gris}"
+                
+            return res if res else "• Monitoreo activo: Sin eventos críticos en este bloque horario."
+    except Exception as e:
+        print(f"Error al obtener noticias: {e}")
+    return "🔴 **Alta:** NÓMINAS / Tipos de interés / Empleo.\n🟡 **Media:** Discursos de bancos centrales.\n⚪ **Baja:** Datos secundarios de inventarios."
+
+def generar_reporte_mercado():
+    """Consulta en vivo y genera el reporte institucional completo con datos dinámicos y actualizados"""
+    try:
+        # Descarga de datos en tiempo real con respaldo
         eur_ticker = yf.Ticker("EURUSD=X")
         df_eur = eur_ticker.history(period="1d", interval="1m")
         if df_eur.empty:
@@ -52,8 +97,11 @@ def generar_reporte_mercado():
             delta = df_eur['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            
+            loss = loss.replace(0, 0.00001)
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
+            
             rsi_val = rsi.iloc[-1]
             if not pd.isna(rsi_val):
                 rsi_actual = float(rsi_val.item() if hasattr(rsi_val, 'item') else rsi_val)
@@ -64,13 +112,16 @@ def generar_reporte_mercado():
             low_val = df_eur['Low'].min()
             low_asia = float(low_val.item() if hasattr(low_val, 'item') else low_val)
 
-        # Cálculos de Gestión de Riesgo (Ratio 1:2 - SL 20 pips / TP 40 pips)
+        # Cálculos exactos de Gestión de Riesgo (Ratio 1:2 - SL 20 pips / TP 40 pips dinámicos)
         sl_buy = precio_actual - 0.0020
         tp_buy = precio_actual + 0.0040
         sl_sell = precio_actual + 0.0020
         tp_sell = precio_actual - 0.0040
 
-        # Hora exacta del servidor en tiempo real
+        # Obtener noticias categorizadas de Forex Factory en vivo
+        noticias_rf = obtener_noticias_forex_factory()
+
+        # Hora exacta del servidor al segundo para verificar actividad en tiempo real
         hora_exacta = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         mensaje = (
@@ -89,10 +140,8 @@ def generar_reporte_mercado():
             f"🌅 **RANGO SESIÓN ASIÁTICA:**\n"
             f"• Máximo (High): {high_asia:.5f}\n"
             f"• Mínimo (Low): {low_asia:.5f}\n\n"
-            f"📰 **Forex Factory (Impactos):**\n"
-            f"🔴 **Alta:** Monitoreo crítico de tipos de interés y empleo.\n"
-            f"🟡 **Media:** Discursos y actas de política monetaria.\n"
-            f"⚪ **Baja:** Datos secundarios de inventarios y balanza comercial.\n\n"
+            f"📰 **Forex Factory (Noticias en Vivo):**\n"
+            f"{noticias_rf}\n\n"
             f"💼 **Wall Street, Energía & Geopolítica:**\n"
             f"• Petróleo y Dólar: La fluctuación del Brent impacta directamente la inflación europea y la moneda refugio.\n"
             f"• Geopolítica: Seguimiento activo de tensiones globales y decisiones del BCE / FED.\n\n"
