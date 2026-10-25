@@ -16,24 +16,27 @@ CHAT_ID = "8662528470"
 alerta_enviada_hoy = False
 
 def generar_reporte_mercado():
-    """Consulta en vivo y fuerza la actualización de precios reales del mercado"""
+    """Consulta en vivo y fuerza la actualización de precios reales del mercado de forma segura"""
     try:
-        # Descarga directa y rápida del precio actual para evitar caché estática
+        # Descarga de datos
         eur_data = yf.download("EURUSD=X", period="1d", interval="1m", progress=False)
         brent_data = yf.download("BZ=F", period="1d", interval="1m", progress=False)
-        
-        # Respaldo con histórico si la descarga rápida viene vacía
         df_eur = yf.Ticker("EURUSD=X").history(period="5d", interval="15m")
         
+        # Precio actual seguro para evitar errores de tipo Series
         precio_actual = 1.12000
-        if not eur_data.empty:
-            precio_actual = float(eur_data['Close'].iloc[-1])
+        if not eur_data.empty and 'Close' in eur_data:
+            val = eur_data['Close'].iloc[-1]
+            precio_actual = float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
         elif not df_eur.empty:
-            precio_actual = float(df_eur['Close'].iloc[-1])
+            val = df_eur['Close'].iloc[-1]
+            precio_actual = float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
 
+        # Precio Brent seguro
         precio_brent = 115.56
-        if not brent_data.empty:
-            precio_brent = float(brent_data['Close'].iloc[-1])
+        if not brent_data.empty and 'Close' in brent_data:
+            val_b = brent_data['Close'].iloc[-1]
+            precio_brent = float(val_b.iloc[0]) if hasattr(val_b, 'iloc') else float(val_b)
 
         ema_50 = 1.11900
         rsi_actual = 50.0
@@ -41,20 +44,25 @@ def generar_reporte_mercado():
         low_asia = precio_actual - 0.0020
 
         if not df_eur.empty:
-            ema_50 = float(df_eur['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
+            ema_series = df_eur['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
+            ema_50 = float(ema_series.iloc[0]) if hasattr(ema_series, 'iloc') else float(ema_series)
             
             delta = df_eur['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
-            if not pd.isna(rsi.iloc[-1]):
-                rsi_actual = float(rsi.iloc[-1])
+            rsi_val = rsi.iloc[-1]
+            if not pd.isna(rsi_val):
+                rsi_actual = float(rsi_val.iloc[0]) if hasattr(rsi_val, 'iloc') else float(rsi_val)
             
-            high_asia = float(df_eur['High'].max())
-            low_asia = float(df_eur['Low'].min())
+            high_val = df_eur['High'].max()
+            high_asia = float(high_val.iloc[0]) if hasattr(high_val, 'iloc') else float(high_val)
+            
+            low_val = df_eur['Low'].min()
+            low_asia = float(low_val.iloc[0]) if hasattr(low_val, 'iloc') else float(low_val)
 
-        # Cálculos exactos de Gestión de Riesgo (Ratio 1:2 - SL 20 pips / TP 40 pips)
+        # Cálculos de Gestión de Riesgo (Ratio 1:2 - SL 20 pips / TP 40 pips)
         sl_buy = precio_actual - 0.0020
         tp_buy = precio_actual + 0.0040
         sl_sell = precio_actual + 0.0020
@@ -106,7 +114,7 @@ def enviar_telegram(chat_id, mensaje):
 @app.route("/")
 def home():
     """Ruta web para UptimeRobot (mantiene a Render despierto 24/7)"""
-    return "Bot institucional interactivo con lectura en vivo operando al 100% 🚀"
+    return "Bot institucional interactivo operando al 100% 🚀"
 
 def background_trading_monitor():
     """Vigila en segundo plano si el precio rompe los rangos de Asia para avisarte solo"""
