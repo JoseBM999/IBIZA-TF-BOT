@@ -16,24 +16,32 @@ CHAT_ID = "8662528470"
 alerta_enviada_hoy = False
 
 def generar_reporte_mercado():
-    """Consulta en vivo todos los datos técnicos y fundamentales del mercado"""
+    """Consulta en vivo y fuerza la actualización de precios reales del mercado"""
     try:
-        eur_usd = yf.Ticker("EURUSD=X")
-        df_eur = eur_usd.history(period="5d", interval="15m")
+        # Descarga directa y rápida del precio actual para evitar caché estática
+        eur_data = yf.download("EURUSD=X", period="1d", interval="1m", progress=False)
+        brent_data = yf.download("BZ=F", period="1d", interval="1m", progress=False)
         
-        # Actualizado al ticker exacto del Brent Financial para que coincida con Google
-        brent = yf.Ticker("BZ=F")
-        df_brent = brent.history(period="1d", interval="1h")
+        # Respaldo con histórico si la descarga rápida viene vacía
+        df_eur = yf.Ticker("EURUSD=X").history(period="5d", interval="15m")
         
         precio_actual = 1.12000
+        if not eur_data.empty:
+            precio_actual = float(eur_data['Close'].iloc[-1])
+        elif not df_eur.empty:
+            precio_actual = float(df_eur['Close'].iloc[-1])
+
+        precio_brent = 115.56
+        if not brent_data.empty:
+            precio_brent = float(brent_data['Close'].iloc[-1])
+
         ema_50 = 1.11900
         rsi_actual = 50.0
-        high_asia = 1.12150
-        low_asia = 1.11950
+        high_asia = precio_actual + 0.0020
+        low_asia = precio_actual - 0.0020
 
         if not df_eur.empty:
-            precio_actual = df_eur['Close'].iloc[-1]
-            ema_50 = df_eur['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
+            ema_50 = float(df_eur['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
             
             delta = df_eur['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -41,14 +49,12 @@ def generar_reporte_mercado():
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
             if not pd.isna(rsi.iloc[-1]):
-                rsi_actual = rsi.iloc[-1]
+                rsi_actual = float(rsi.iloc[-1])
             
-            high_asia = df_eur['High'].max()
-            low_asia = df_eur['Low'].min()
+            high_asia = float(df_eur['High'].max())
+            low_asia = float(df_eur['Low'].min())
 
-        # Si el ticker principal arroja datos, los toma; si no, usa el valor actual de referencia exacta de los $115.56
-        precio_brent = df_brent['Close'].iloc[-1] if not df_brent.empty else 115.56
-
+        # Cálculos exactos de Gestión de Riesgo (Ratio 1:2 - SL 20 pips / TP 40 pips)
         sl_buy = precio_actual - 0.0020
         tp_buy = precio_actual + 0.0040
         sl_sell = precio_actual + 0.0020
@@ -100,7 +106,7 @@ def enviar_telegram(chat_id, mensaje):
 @app.route("/")
 def home():
     """Ruta web para UptimeRobot (mantiene a Render despierto 24/7)"""
-    return "Bot institucional interactivo operando al 100% 🚀"
+    return "Bot institucional interactivo con lectura en vivo operando al 100% 🚀"
 
 def background_trading_monitor():
     """Vigila en segundo plano si el precio rompe los rangos de Asia para avisarte solo"""
