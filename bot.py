@@ -16,36 +16,38 @@ CHAT_ID = "8662528470"
 alerta_enviada_hoy = False
 
 def generar_reporte_mercado():
-    """Consulta en vivo y fuerza la actualización de precios reales del mercado de forma segura"""
+    """Consulta en vivo y de forma totalmente segura los precios del mercado"""
     try:
-        # Descarga de datos
-        eur_data = yf.download("EURUSD=X", period="1d", interval="1m", progress=False)
-        brent_data = yf.download("BZ=F", period="1d", interval="1m", progress=False)
-        df_eur = yf.Ticker("EURUSD=X").history(period="5d", interval="15m")
-        
-        # Precio actual seguro para evitar errores de tipo Series
+        # Usamos Ticker().history para evitar conflictos de estructuras en Pandas
+        eur_ticker = yf.Ticker("EURUSD=X")
+        df_eur = eur_ticker.history(period="1d", interval="1m")
+        if df_eur.empty:
+            df_eur = eur_ticker.history(period="5d", interval="15m")
+
+        brent_ticker = yf.Ticker("BZ=F")
+        df_brent = brent_ticker.history(period="1d", interval="1h")
+        if df_brent.empty:
+            df_brent = brent_ticker.history(period="5d", interval="1d")
+
+        # Extracción segura de valores numéricos puros
         precio_actual = 1.12000
-        if not eur_data.empty and 'Close' in eur_data:
-            val = eur_data['Close'].iloc[-1]
-            precio_actual = float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
-        elif not df_eur.empty:
+        if not df_eur.empty:
             val = df_eur['Close'].iloc[-1]
-            precio_actual = float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
+            precio_actual = float(val.item() if hasattr(val, 'item') else val)
 
-        # Precio Brent seguro
         precio_brent = 115.56
-        if not brent_data.empty and 'Close' in brent_data:
-            val_b = brent_data['Close'].iloc[-1]
-            precio_brent = float(val_b.iloc[0]) if hasattr(val_b, 'iloc') else float(val_b)
+        if not df_brent.empty:
+            val_b = df_brent['Close'].iloc[-1]
+            precio_brent = float(val_b.item() if hasattr(val_b, 'item') else val_b)
 
-        ema_50 = 1.11900
+        ema_50 = precio_actual - 0.0010
         rsi_actual = 50.0
         high_asia = precio_actual + 0.0020
         low_asia = precio_actual - 0.0020
 
         if not df_eur.empty:
             ema_series = df_eur['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
-            ema_50 = float(ema_series.iloc[0]) if hasattr(ema_series, 'iloc') else float(ema_series)
+            ema_50 = float(ema_series.item() if hasattr(ema_series, 'item') else ema_series)
             
             delta = df_eur['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -54,13 +56,13 @@ def generar_reporte_mercado():
             rsi = 100 - (100 / (1 + rs))
             rsi_val = rsi.iloc[-1]
             if not pd.isna(rsi_val):
-                rsi_actual = float(rsi_val.iloc[0]) if hasattr(rsi_val, 'iloc') else float(rsi_val)
+                rsi_actual = float(rsi_val.item() if hasattr(rsi_val, 'item') else rsi_val)
             
             high_val = df_eur['High'].max()
-            high_asia = float(high_val.iloc[0]) if hasattr(high_val, 'iloc') else float(high_val)
+            high_asia = float(high_val.item() if hasattr(high_val, 'item') else high_val)
             
             low_val = df_eur['Low'].min()
-            low_asia = float(low_val.iloc[0]) if hasattr(low_val, 'iloc') else float(low_val)
+            low_asia = float(low_val.item() if hasattr(low_val, 'item') else low_val)
 
         # Cálculos de Gestión de Riesgo (Ratio 1:2 - SL 20 pips / TP 40 pips)
         sl_buy = precio_actual - 0.0020
