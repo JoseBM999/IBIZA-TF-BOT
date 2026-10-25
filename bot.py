@@ -9,18 +9,18 @@ from flask import Flask
 
 app = Flask(__name__)
 
-# Tus credenciales oficiales integradas
+# Tus credenciales oficiales
 TOKEN = "8798266906:AAEkczcf-Unknsm-SZKoN3q5LQZ-2OemZkY"
 CHAT_ID = "8662528470"
+
+# Variables globales para controlar el estado de ruptura y no spamear cada minuto
+alerta_enviada_hoy = False
 
 def generar_reporte_mercado():
     """Consulta en vivo todos los datos técnicos y fundamentales del mercado"""
     try:
-        # 1. Obtener datos en vivo de EUR/USD
         eur_usd = yf.Ticker("EURUSD=X")
         df_eur = eur_usd.history(period="5d", interval="15m")
-        
-        # 2. Obtener datos en vivo del Brent
         brent = yf.Ticker("BZ=F")
         df_brent = brent.history(period="1d", interval="1h")
         
@@ -34,7 +34,6 @@ def generar_reporte_mercado():
             precio_actual = df_eur['Close'].iloc[-1]
             ema_50 = df_eur['Close'].ewm(span=50, adjust=False).mean().iloc[-1]
             
-            # Cálculo del RSI
             delta = df_eur['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -43,13 +42,11 @@ def generar_reporte_mercado():
             if not pd.isna(rsi.iloc[-1]):
                 rsi_actual = rsi.iloc[-1]
             
-            # Máximos y mínimos de la sesión
             high_asia = df_eur['High'].max()
             low_asia = df_eur['Low'].min()
 
         precio_brent = df_brent['Close'].iloc[-1] if not df_brent.empty else 111.0
 
-        # Gestión de Riesgo (Ratio 1:2 - SL 20 pips / TP 40 pips)
         sl_buy = precio_actual - 0.0020
         tp_buy = precio_actual + 0.0040
         sl_sell = precio_actual + 0.0020
@@ -81,9 +78,9 @@ def generar_reporte_mercado():
             f"------------------------------------\n"
             f"📍 **ESTADO:** 🔄 Datos actualizados al momento de tu consulta."
         )
-        return mensaje
+        return mensaje, precio_actual, high_asia, low_asia
     except Exception as e:
-        return f"⚠️ Error al obtener datos del mercado: {e}"
+        return f"⚠️ Error al obtener datos del mercado: {e}", 0, 0, 0
 
 def enviar_telegram(chat_id, mensaje):
     """Envía el mensaje directamente al chat de Telegram"""
@@ -101,11 +98,51 @@ def enviar_telegram(chat_id, mensaje):
 @app.route("/")
 def home():
     """Ruta web para UptimeRobot (mantiene a Render despierto 24/7)"""
-    return "Bot institucional interactivo operando al 100% 🚀"
+    return "Bot institucional interactivo con alertas de ruptura operando 🚀"
+
+def background_trading_monitor():
+    """Vigila en segundo plano si el precio rompe los rangos de Asia para avisarte solo"""
+    global alerta_enviada_hoy
+    print("¡Monitor automático de rupturas iniciado en segundo plano!")
+    
+    while True:
+        try:
+            _, precio_actual, high_asia, low_asia = generar_reporte_mercado()
+            
+            if precio_actual > 0 and high_asia > 0 and low_asia > 0:
+                # Alerta si rompe el Máximo de Asia al alza
+                if precio_actual > high_asia and not alerta_enviada_hoy:
+                    alerta_ruptura = (
+                        f"🚨 **¡ALERTA DE RUPTURA INSTITUCIONAL!** 🚀\n\n"
+                        f"📈 El precio del **EUR/USD ({precio_actual:.5f})** acaba de **romper al alza el Máximo de la Sesión Asiática** ({high_asia:.5f}).\n\n"
+                        f"⚡ ¡Atentos a posibles confirmaciones de continuación o throwback!"
+                    )
+                    enviar_telegram(CHAT_ID, alerta_ruptura)
+                    alerta_enviada_hoy = True
+                
+                # Alerta si rompe el Mínimo de Asia a la baja
+                elif precio_actual < low_asia and not alerta_enviada_hoy:
+                    alerta_ruptura = (
+                        f"🚨 **¡ALERTA DE RUPTURA INSTITUCIONAL!** ⚠️\n\n"
+                        f"📉 El precio del **EUR/USD ({precio_actual:.5f})** acaba de **romper a la baja el Mínimo de la Sesión Asiática** ({low_asia:.5f}).\n\n"
+                        f"⚡ ¡Atentos a posibles escenarios bajistas o trampas de liquidez!"
+                    )
+                    enviar_telegram(CHAT_ID, alerta_ruptura)
+                    alerta_enviada_hoy = True
+                
+                # Resetea el aviso si el precio vuelve a entrar al rango (para nuevas oportunidades)
+                elif low_asia <= precio_actual <= high_asia:
+                    alerta_enviada_hoy = False
+
+        except Exception as e:
+            print(f"Error en el monitor automático: {e}")
+            
+        # Revisa el mercado cada 3 minutos
+        time.sleep(180)
 
 def background_telegram_listener():
     """Escucha constantemente si le escribes al bot para responderte al instante"""
-    print("¡Hilo de escucha de Telegram iniciado con éxito!")
+    print("¡Hilo de escucha de Telegram interactivo iniciado!")
     last_update_id = 0
     while True:
         try:
@@ -119,8 +156,8 @@ def background_telegram_listener():
                     chat_id = str(message.get("chat", {}).get("id", ""))
                     
                     if chat_id:
-                        # Cada vez que escribas, genera el reporte fresco y mándalo
-                        reporte_fresco = generar_reporte_mercado()
+                        # Si le escribes, le mandas el reporte completo al instante
+                        reporte_fresco, _, _, _ = generar_reporte_mercado()
                         enviar_telegram(chat_id, reporte_fresco)
         except Exception as e:
             print(f"Error en el listener: {e}")
@@ -128,10 +165,15 @@ def background_telegram_listener():
         time.sleep(1)
 
 if __name__ == "__main__":
-    # Arranca el hilo de escucha en segundo plano
+    # Hilo 1: Escucha tus mensajes y responde al toque
     hilo_listener = threading.Thread(target=background_telegram_listener)
     hilo_listener.daemon = True
     hilo_listener.start()
+
+    # Hilo 2: Vigila automáticamente las rupturas de sesión en segundo plano
+    hilo_monitor = threading.Thread(target=background_trading_monitor)
+    hilo_monitor.daemon = True
+    hilo_monitor.start()
 
     # Arranca Flask para Render
     port = int(os.environ.get("PORT", 5000))
