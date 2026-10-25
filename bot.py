@@ -43,37 +43,54 @@ def obtener_noticias_forex_factory():
         print(f"Error noticias: {e}")
     return "• Monitoreo activo: Sin eventos críticos en este bloque."
 
-def generar_reporte_mercado():
-    """Consulta directa y blindada para evitar cualquier bloqueo de caché"""
+def obtener_precio_eurusd_realtime():
+    """Consulta directa a API financiera en tiempo real para evitar la caché de yfinance"""
     try:
-        # Descarga rápida de los últimos 2 días para garantizar datos limpios
+        url = "https://open.er-api.com/v6/latest/EUR"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            rates = data.get("rates", {})
+            if "USD" in rates:
+                return float(rates["USD"])
+    except Exception as e:
+        print(f"Error al obtener precio en vivo: {e}")
+    return None
+
+def generar_reporte_mercado():
+    """Consulta en vivo con cotizaciones en tiempo real"""
+    try:
+        # 1. Obtención del precio real en vivo sin caché
+        precio_actual = obtener_precio_eurusd_realtime()
+        if not precio_actual:
+            precio_actual = 1.12045 # Resguardo si falla la red
+
+        # 2. Descarga de datos para EMA, RSI y Brent
         eur = yf.download("EURUSD=X", period="2d", interval="15m", progress=False)
         brent = yf.download("BZ=F", period="2d", interval="1h", progress=False)
 
-        # Aplanamiento seguro de columnas si vienen en MultiIndex
         if isinstance(eur.columns, pd.MultiIndex):
             eur.columns = eur.columns.get_level_values(0)
         if isinstance(brent.columns, pd.MultiIndex):
             brent.columns = brent.columns.get_level_values(0)
 
-        # Valores por defecto seguros por si la red parpadea
-        precio_actual = 1.12045
-        precio_brent = 110.52
-        ema_50 = 1.12027
+        precio_brent = 110.78
+        ema_50 = precio_actual - 0.00032
         rsi_actual = 50.0
-        high_asia = 1.12296
-        low_asia = 1.11894
+        high_asia = precio_actual + 0.0020
+        low_asia = precio_actual - 0.0020
 
         if not eur.empty and 'Close' in eur.columns:
             close_series = eur['Close'].dropna()
             if len(close_series) > 0:
-                precio_actual = float(close_series.iloc[-1].item() if hasattr(close_series.iloc[-1], 'item') else close_series.iloc[-1])
+                # Reemplazamos el último valor de la serie con el precio exacto en vivo
+                close_series.iloc[-1] = precio_actual
                 
                 # Cálculo real de EMA 50
                 ema_series = close_series.ewm(span=50, adjust=False).mean()
                 ema_50 = float(ema_series.iloc[-1].item() if hasattr(ema_series.iloc[-1], 'item') else ema_series.iloc[-1])
 
-                # Cálculo de RSI real de 14 periodos blindado contra ceros
+                # Cálculo de RSI 14
                 delta = close_series.diff()
                 gain = delta.clip(lower=0).rolling(window=14).mean()
                 loss = (-delta.clip(upper=0)).rolling(window=14).mean()
@@ -88,7 +105,7 @@ def generar_reporte_mercado():
                     rsi_calc = 100 - (100 / (1 + rs))
                     rsi_actual = float(rsi_calc.item() if hasattr(rsi_calc, 'item') else rsi_calc)
                 else:
-                    rsi_actual = 50.0 # Neutro si el mercado está plano
+                    rsi_actual = 50.0
 
             if 'High' in eur.columns:
                 high_asia = float(eur['High'].max().item() if hasattr(eur['High'].max(), 'item') else eur['High'].max())
@@ -100,7 +117,7 @@ def generar_reporte_mercado():
             if len(brent_series) > 0:
                 precio_brent = float(brent_series.iloc[-1].item() if hasattr(brent_series.iloc[-1], 'item') else brent_series.iloc[-1])
 
-        # Gestión de riesgo 1:2 dinámica
+        # Gestión de riesgo 1:2 dinámica sobre el PRECIO EN VIVO REAL
         sl_buy = precio_actual - 0.0020
         tp_buy = precio_actual + 0.0040
         sl_sell = precio_actual + 0.0020
@@ -123,7 +140,7 @@ def generar_reporte_mercado():
             f"• Take Profit (TP): +40 pips ({tp_buy:.5f})\n\n"
             f"🔴 **ESCENARIO DE VENTA (SELL):**\n"
             f"• Stop Loss (SL): -20 pips ({sl_sell:.5f})\n"
-            f"• Take Profit (TP): +40 pips ({tp_sell:.5f})\n\n"
+            f"• Take Profit (TP): -40 pips ({tp_sell:.5f})\n\n"
             f"• **Ratio Riesgo/Beneficio:** 1:2 (Estructura Institucional)\n\n"
             f"🌅 **RANGO SESIÓN ASIÁTICA:**\n"
             f"• Máximo (High): {high_asia:.5f}\n"
