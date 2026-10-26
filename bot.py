@@ -43,29 +43,10 @@ def obtener_noticias_forex_factory():
         print(f"Error noticias: {e}")
     return "• Monitoreo activo: Sin eventos críticos en este bloque."
 
-def obtener_precio_eurusd_realtime():
-    """Consulta directa a API financiera en tiempo real"""
-    try:
-        url = "https://open.er-api.com/v6/latest/EUR"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            rates = data.get("rates", {})
-            if "USD" in rates:
-                return float(rates["USD"])
-    except Exception as e:
-        print(f"Error al obtener precio en vivo: {e}")
-    return None
-
 def generar_reporte_mercado():
-    """Genera el reporte extrayendo absolutamente todo de la nube, sin datos fijos"""
+    """Genera el reporte extrayendo precio, EMA, RSI y rangos 100% de la misma fuente (yfinance) para evitar desajustes"""
     try:
-        # 1. Obtención del precio real en vivo
-        precio_actual = obtener_precio_eurusd_realtime()
-        if not precio_actual:
-            raise ValueError("No se pudo obtener el precio en vivo de EUR/USD desde la API.")
-
-        # 2. Descarga de datos para indicadores y Brent
+        # Descarga de datos de yfinance para EUR/USD y Brent
         eur = yf.download("EURUSD=X", period="2d", interval="15m", progress=False)
         brent = yf.download("BZ=F", period="2d", interval="1h", progress=False)
 
@@ -75,7 +56,7 @@ def generar_reporte_mercado():
             brent.columns = brent.columns.get_level_values(0)
 
         if eur.empty or 'Close' not in eur.columns:
-            raise ValueError("No se pudieron descargar los datos históricos de EUR/USD.")
+            raise ValueError("No se pudieron descargar los datos de EUR/USD.")
         if brent.empty or 'Close' not in brent.columns:
             raise ValueError("No se pudieron descargar los datos del Brent.")
 
@@ -83,14 +64,14 @@ def generar_reporte_mercado():
         if len(close_series) == 0:
             raise ValueError("La serie de cierre de EUR/USD está vacía.")
 
-        # Inyectamos el precio real en vivo en la última posición del cálculo
-        close_series.iloc[-1] = precio_actual
-        
-        # Cálculo estricto de EMA 50
+        # Precio actual exactamente igual al último cierre de la vela de yfinance (sincronizado con TradingView)
+        precio_actual = float(close_series.iloc[-1].item() if hasattr(close_series.iloc[-1], 'item') else close_series.iloc[-1])
+
+        # Cálculo de EMA 50 usando la misma serie de velas
         ema_series = close_series.ewm(span=50, adjust=False).mean()
         ema_50 = float(ema_series.iloc[-1].item() if hasattr(ema_series.iloc[-1], 'item') else ema_series.iloc[-1])
 
-        # Cálculo estricto de RSI 14
+        # Cálculo de RSI 14 usando la misma serie de velas (sin interferencias externas)
         delta = close_series.diff()
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
@@ -107,15 +88,14 @@ def generar_reporte_mercado():
         else:
             rsi_actual = 50.0
 
-        # Rangos de la Sesión Asiática extraídos de la nube
+        # Rangos de la Sesión Asiática y Brent
         high_asia = float(eur['High'].max().item() if hasattr(eur['High'].max(), 'item') else eur['High'].max())
         low_asia = float(eur['Low'].min().item() if hasattr(eur['Low'].min(), 'item') else eur['Low'].min())
 
-        # Precio del Brent extraído de la nube
         brent_series = brent['Close'].dropna()
         precio_brent = float(brent_series.iloc[-1].item() if hasattr(brent_series.iloc[-1], 'item') else brent_series.iloc[-1])
 
-        # Gestión de riesgo institucional 1:2 dinámica sobre el precio real
+        # Gestión de riesgo institucional 1:2
         sl_buy = precio_actual - 0.0020
         tp_buy = precio_actual + 0.0040
         sl_sell = precio_actual + 0.0020
@@ -149,7 +129,7 @@ def generar_reporte_mercado():
             f"• Petróleo y Dólar: La fluctuación del Brent impacta directamente la inflación europea y la moneda refugio.\n"
             f"• Geopolítica: Seguimiento activo de tensiones globales y decisiones del BCE / FED.\n\n"
             f"------------------------------------\n"
-            f"📍 **ESTADO:** 🔄 Datos 100% de la nube (Sin resguardos fijos)\n"
+            f"📍 **ESTADO:** 🔄 Sincronizado 100% con velas en vivo\n"
             f"⏱️ **Hora Colombia:** {hora_exacta}"
         )
         return mensaje, precio_actual, high_asia, low_asia
@@ -167,7 +147,7 @@ def enviar_telegram(chat_id, mensaje):
 
 @app.route("/")
 def home():
-    return "Bot institucional sin datos fijos operando al 100% 🚀"
+    return "Bot institucional sincronizado operando al 100% 🚀"
 
 def background_trading_monitor():
     global alerta_enviada_hoy
