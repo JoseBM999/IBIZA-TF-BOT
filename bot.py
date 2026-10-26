@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import requests
 import yfinance as yf
 import pandas as pd
+import xml.etree.ElementTree as ET
 from flask import Flask
 
 app = Flask(__name__)
@@ -40,13 +41,32 @@ def obtener_noticias_forex_factory():
             if texto_gris:
                 return f"⚪ **Carpeta Blanca/Gris (Baja/Actualizados):**\n{texto_gris}"
     except Exception as e:
-        print(f"Error noticias: {e}")
+        print(f"Error noticias FF: {e}")
     return "• Monitoreo activo: Sin eventos críticos en este bloque."
 
-def generar_reporte_mercado():
-    """Genera el reporte extrayendo precio, EMA, RSI y rangos 100% de la misma fuente (yfinance) para evitar desajustes"""
+def obtener_noticias_wall_street():
+    """Consume y parsea en vivo los titulares de Wall Street y Energía desde la nube"""
     try:
-        # Descarga de datos de yfinance para EUR/USD y Brent
+        url = "https://finance.yahoo.com/news/rss"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            root = ET.fromstring(response.content)
+            items = root.findall('.//item')[:3] # Extrae los 3 titulares más recientes
+            texto = ""
+            for item in items:
+                title = item.find('title')
+                if title is not None and title.text:
+                    texto += f"• {title.text}\n"
+            if texto:
+                return f"💼 **Wall Street & Energía (En Vivo):**\n{texto}"
+    except Exception as e:
+        print(f"Error WS news: {e}")
+    return "💼 **Wall Street & Energía:** • Monitoreo de flujos institucionales en curso."
+
+def generar_reporte_mercado():
+    """Genera el reporte con RSI Wilder estándar, Forex Factory y Wall Street 100% dinámicos"""
+    try:
         eur = yf.download("EURUSD=X", period="2d", interval="15m", progress=False)
         brent = yf.download("BZ=F", period="2d", interval="1h", progress=False)
 
@@ -64,29 +84,24 @@ def generar_reporte_mercado():
         if len(close_series) == 0:
             raise ValueError("La serie de cierre de EUR/USD está vacía.")
 
-        # Precio actual exactamente igual al último cierre de la vela de yfinance (sincronizado con TradingView)
+        # Precio actual sincronizado con el último cierre de la vela
         precio_actual = float(close_series.iloc[-1].item() if hasattr(close_series.iloc[-1], 'item') else close_series.iloc[-1])
 
-        # Cálculo de EMA 50 usando la misma serie de velas
+        # Cálculo de EMA 50
         ema_series = close_series.ewm(span=50, adjust=False).mean()
         ema_50 = float(ema_series.iloc[-1].item() if hasattr(ema_series.iloc[-1], 'item') else ema_series.iloc[-1])
 
-        # Cálculo de RSI 14 usando la misma serie de velas (sin interferencias externas)
+        # Cálculo de RSI 14 con la fórmula estándar de Wilder (igual a TradingView)
         delta = close_series.diff()
-        gain = delta.clip(lower=0).rolling(window=14).mean()
-        loss = (-delta.clip(upper=0)).rolling(window=14).mean()
+        gain = delta.clip(lower=0)
+        loss = (-delta.clip(upper=0))
         
-        g_val = gain.iloc[-1]
-        l_val = loss.iloc[-1]
-        g_val = float(g_val.item() if hasattr(g_val, 'item') else g_val) if not pd.isna(g_val) else 0.0
-        l_val = float(l_val.item() if hasattr(l_val, 'item') else l_val) if not pd.isna(l_val) else 0.0
-
-        if l_val > 0:
-            rs = g_val / l_val
-            rsi_calc = 100 - (100 / (1 + rs))
-            rsi_actual = float(rsi_calc.item() if hasattr(rsi_calc, 'item') else rsi_calc)
-        else:
-            rsi_actual = 50.0
+        avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
+        
+        rs = avg_gain / avg_loss
+        rsi_series = 100 - (100 / (1 + rs))
+        rsi_actual = float(rsi_series.iloc[-1].item() if hasattr(rsi_series.iloc[-1], 'item') else rsi_series.iloc[-1])
 
         # Rangos de la Sesión Asiática y Brent
         high_asia = float(eur['High'].max().item() if hasattr(eur['High'].max(), 'item') else eur['High'].max())
@@ -102,6 +117,7 @@ def generar_reporte_mercado():
         tp_sell = precio_actual - 0.0040
 
         noticias_rf = obtener_noticias_forex_factory()
+        noticias_ws = obtener_noticias_wall_street()
 
         # Hora exacta en Colombia (UTC-5)
         colombia_tz = timezone(timedelta(hours=-5))
@@ -125,11 +141,9 @@ def generar_reporte_mercado():
             f"• Mínimo (Low): {low_asia:.5f}\n\n"
             f"📰 **Forex Factory (Noticias en Vivo):**\n"
             f"{noticias_rf}\n\n"
-            f"💼 **Wall Street, Energía & Geopolítica:**\n"
-            f"• Petróleo y Dólar: La fluctuación del Brent impacta directamente la inflación europea y la moneda refugio.\n"
-            f"• Geopolítica: Seguimiento activo de tensiones globales y decisiones del BCE / FED.\n\n"
+            f"{noticias_ws}\n\n"
             f"------------------------------------\n"
-            f"📍 **ESTADO:** 🔄 Sincronizado 100% con velas en vivo\n"
+            f"📍 **ESTADO:** 🔄 Datos 100% dinámicos de la nube\n"
             f"⏱️ **Hora Colombia:** {hora_exacta}"
         )
         return mensaje, precio_actual, high_asia, low_asia
@@ -147,7 +161,7 @@ def enviar_telegram(chat_id, mensaje):
 
 @app.route("/")
 def home():
-    return "Bot institucional sincronizado operando al 100% 🚀"
+    return "Bot institucional 100% dinámico operando al 100% 🚀"
 
 def background_trading_monitor():
     global alerta_enviada_hoy
