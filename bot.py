@@ -17,7 +17,7 @@ CHAT_ID = "8662528470"
 alerta_enviada_hoy = False
 
 def obtener_noticias_forex_factory():
-    """Consume el feed oficial en vivo del calendario de Forex Factory"""
+    """Consume el feed oficial en vivo. Si no hay datos o falla, retorna vacío (cero texto estático)."""
     try:
         url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
         response = requests.get(url, timeout=5)
@@ -26,9 +26,6 @@ def obtener_noticias_forex_factory():
             colombia_tz = timezone(timedelta(hours=-5))
             hoy_str = datetime.now(colombia_tz).strftime('%Y-%m-%d')
             noticias_hoy = [e for e in events if e.get('date', '').startswith(hoy_str)]
-            
-            if not noticias_hoy:
-                noticias_hoy = events[:5]
             
             texto_gris = ""
             for event in noticias_hoy[:6]:
@@ -39,20 +36,20 @@ def obtener_noticias_forex_factory():
                 texto_gris += f"• [{country}] {title} ({time_str})\n"
                 
             if texto_gris:
-                return f"⚪ **Carpeta Blanca/Gris (Baja/Actualizados):**\n{texto_gris}"
+                return f"📰 **Forex Factory (En Vivo):**\n{texto_gris}"
     except Exception as e:
         print(f"Error noticias FF: {e}")
-    return "• Monitoreo activo: Sin eventos críticos en este bloque."
+    return ""
 
 def obtener_noticias_wall_street():
-    """Consume y parsea en vivo los titulares de Wall Street y Mercados desde CNBC RSS"""
+    """Consume los titulares de CNBC en vivo. Si falla, retorna vacío (cero texto estático)."""
     try:
         url = "https://www.cnbc.com/id/10000664/device/rss/rss.html"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             root = ET.fromstring(response.content)
-            items = root.findall('.//item')[:3] # Extrae los 3 titulares más recientes
+            items = root.findall('.//item')[:3]
             texto = ""
             for item in items:
                 title = item.find('title')
@@ -62,10 +59,10 @@ def obtener_noticias_wall_street():
                 return f"💼 **Wall Street & Mercados (En Vivo):**\n{texto}"
     except Exception as e:
         print(f"Error WS news: {e}")
-    return "💼 **Wall Street & Mercados:** • Monitoreo de flujos institucionales en curso."
+    return ""
 
 def generar_reporte_mercado():
-    """Genera el reporte con RSI Wilder estándar, Forex Factory y Wall Street 100% dinámicos"""
+    """Genera el reporte extrayendo 100% datos de la nube sin bloques de texto fijo"""
     try:
         eur = yf.download("EURUSD=X", period="2d", interval="15m", progress=False)
         brent = yf.download("BZ=F", period="2d", interval="1h", progress=False)
@@ -91,7 +88,7 @@ def generar_reporte_mercado():
         ema_series = close_series.ewm(span=50, adjust=False).mean()
         ema_50 = float(ema_series.iloc[-1].item() if hasattr(ema_series.iloc[-1], 'item') else ema_series.iloc[-1])
 
-        # Cálculo de RSI 14 con la fórmula estándar de Wilder (igual a TradingView)
+        # Cálculo de RSI 14 (Estándar Wilder / TradingView)
         delta = close_series.diff()
         gain = delta.clip(lower=0)
         loss = (-delta.clip(upper=0))
@@ -138,12 +135,18 @@ def generar_reporte_mercado():
             f"• **Ratio Riesgo/Beneficio:** 1:2 (Estructura Institucional)\n\n"
             f"🌅 **RANGO SESIÓN ASIÁTICA:**\n"
             f"• Máximo (High): {high_asia:.5f}\n"
-            f"• Mínimo (Low): {low_asia:.5f}\n\n"
-            f"📰 **Forex Factory (Noticias en Vivo):**\n"
-            f"{noticias_rf}\n\n"
-            f"{noticias_ws}\n\n"
-            f"------------------------------------\n"
-            f"📍 **ESTADO:** 🔄 Datos 100% dinámicos de la nube\n"
+            f"• Mínimo (Low): {low_asia:.5f}\n"
+        )
+
+        # Se añaden las secciones de noticias únicamente si hay datos frescos de la nube
+        if noticias_rf:
+            mensaje += f"\n{noticias_rf}"
+        if noticias_ws:
+            mensaje += f"\n{noticias_ws}"
+
+        mensaje += (
+            f"\n------------------------------------\n"
+            f"📍 **ESTADO:** 🔄 100% Cloud Data (Cero textos estáticos)\n"
             f"⏱️ **Hora Colombia:** {hora_exacta}"
         )
         return mensaje, precio_actual, high_asia, low_asia
@@ -161,7 +164,7 @@ def enviar_telegram(chat_id, mensaje):
 
 @app.route("/")
 def home():
-    return "Bot institucional 100% dinámico operando al 100% 🚀"
+    return "Bot institucional dinámico sin textos fijos operando al 100% 🚀"
 
 def background_trading_monitor():
     global alerta_enviada_hoy
