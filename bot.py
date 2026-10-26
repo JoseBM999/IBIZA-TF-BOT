@@ -45,10 +45,10 @@ def obtener_noticias_forex_factory():
     return "• Monitoreo activo: Sin eventos críticos en este bloque."
 
 def obtener_noticias_wall_street():
-    """Consume y parsea en vivo los titulares de Wall Street y Energía desde la nube"""
+    """Consume y parsea en vivo los titulares de Wall Street y Mercados desde CNBC RSS"""
     try:
-        url = "https://finance.yahoo.com/news/rss"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        url = "https://www.cnbc.com/id/10000664/device/rss/rss.html"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             root = ET.fromstring(response.content)
@@ -59,10 +59,10 @@ def obtener_noticias_wall_street():
                 if title is not None and title.text:
                     texto += f"• {title.text}\n"
             if texto:
-                return f"💼 **Wall Street & Energía (En Vivo):**\n{texto}"
+                return f"💼 **Wall Street & Mercados (En Vivo):**\n{texto}"
     except Exception as e:
         print(f"Error WS news: {e}")
-    return "💼 **Wall Street & Energía:** • Monitoreo de flujos institucionales en curso."
+    return "💼 **Wall Street & Mercados:** • Monitoreo de flujos institucionales en curso."
 
 def generar_reporte_mercado():
     """Genera el reporte con RSI Wilder estándar, Forex Factory y Wall Street 100% dinámicos"""
